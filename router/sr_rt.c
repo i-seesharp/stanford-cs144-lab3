@@ -22,9 +22,7 @@
 #include "sr_rt.h"
 #include "sr_router.h"
 
-#include "sr_utils.h"
 
-/* Custom method: find the routing table entry which has the longest matching prefix with the destination IP addr */
 struct sr_rt* longest_matching_prefix(struct sr_instance* sr, uint32_t ip) {
     struct sr_rt* longest_prefix_entry = NULL;
 

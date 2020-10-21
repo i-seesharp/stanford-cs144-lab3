@@ -11,79 +11,6 @@
 #include "sr_if.h"
 #include "sr_protocol.h"
 
-/* Custom method: handle ARP request, send ARP requests if necessary, reference: "sr_arpcache.h" */
-void handle_arpreq(struct sr_instance* sr, struct sr_arpreq* request) {
-    /* record current time */
-    time_t current_time;
-    time(&current_time);
-
-    if(difftime(current_time, request->sent) >= 1.0) {
-        if(request->times_sent >= 5) {
-            /* send 'ICMP host unreachable' to source MAC of all packets waiting on this request */
-            struct sr_packet* packet = request->packets;
-            sr_ethernet_hdr_t* packet_eth_hdr;
-            while(packet) {
-                /* extract ethernet header from the packet */
-                packet_eth_hdr = (sr_ethernet_hdr_t*)(packet->buf);
-                /* extract the destination MAC from ethernet header, if the router can find the corresponding interface */
-                if(sr_get_interface_by_mac(sr, (unsigned char*)packet_eth_hdr->ether_dhost)) {
-                    /* send icmp dest_unreachable to packet's source */
-                    send_icmp_msg(sr, packet->buf, packet->len, icmp_type_dest_unreachable, icmp_dest_unreachable_host);
-                }
-                /* default linked list structure of packet sr_packet in "sr_arpcache.h" */
-                packet = packet->next;
-            }
-            sr_arpreq_destroy(&sr->cache, request);
-        } else {
-            /* send ARP request */
-            /* get the interface by name */
-            struct sr_if* interface = sr_get_interface(sr, request->packets->iface);
-            if(!interface) {
-                printf("Error: handle_arpreq: failed to get outgoing interface.\n");
-                return;
-            }
-
-            /* construct ARP request */
-            int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t);
-            uint8_t* arpreq = malloc(len);
-
-            /* construct ARP request ethernet header */
-            sr_ethernet_hdr_t* arpreq_eth_hdr = (sr_ethernet_hdr_t*)arpreq;
-            /* set destination MAC: FF-FF-FF-FF-FF-FF */
-            memset(arpreq_eth_hdr->ether_dhost, 0xFF, ETHER_ADDR_LEN);
-            /* set source MAC: outgoing interface's MAC */
-            memcpy(arpreq_eth_hdr->ether_shost, interface->addr, ETHER_ADDR_LEN);
-            arpreq_eth_hdr->ether_type = htons(ethertype_arp);
-
-            /* construct ARP request ARP header */
-            sr_arp_hdr_t* arpreq_arp_hdr = (sr_arp_hdr_t*)(arpreq + sizeof(sr_ethernet_hdr_t));
-            /* values handled by htons() are all defined in "sr_protocol.h" */
-            arpreq_arp_hdr->ar_hrd = (unsigned short)htons(arp_hrd_ethernet);
-            arpreq_arp_hdr->ar_pro = (unsigned short)htons(ethertype_ip);
-            arpreq_arp_hdr->ar_hln = (unsigned char)ETHER_ADDR_LEN;
-            arpreq_arp_hdr->ar_pln = (unsigned char)sizeof(uint32_t);
-            arpreq_arp_hdr->ar_op = (unsigned short)htons(arp_op_request);
-            /* set sender MAC: outgoing interface's MAC */
-            memcpy(arpreq_arp_hdr->ar_sha, interface->addr, ETHER_ADDR_LEN);
-            /* set sender IP: outgoing interface's IP */
-            arpreq_arp_hdr->ar_sip = interface->ip;
-            /* set target MAC: 00-00-00-00-00-00 */
-            memset(arpreq_arp_hdr->ar_tha, 0x00, ETHER_ADDR_LEN);
-            /* set target IP: request's target IP */
-            arpreq_arp_hdr->ar_tip = request->ip;
-
-            /* 'sr' send 'arpreq' ('len'-byte long) to the interface named 'interface->name' */
-            sr_send_packet(sr, arpreq, len, interface->name);
-            /* free the memory of arpreq after sending */
-            free(arpreq);
-
-            /* update */
-            request->sent = current_time;
-            request->times_sent++;
-        }
-    }
-}
-
 /* 
   This function gets called every second. For each request sent out, we keep
   checking whether we should resend an request or destroy the arp request.
@@ -92,16 +19,89 @@ void handle_arpreq(struct sr_instance* sr, struct sr_arpreq* request) {
 void sr_arpcache_sweepreqs(struct sr_instance *sr) { 
     /* Fill this in */
 
-    /* this router -> ARP cache -> list of ARP requests */
-    struct sr_arpreq* request = sr->cache.requests;
-
-    /* handle ARP requests one by one, default linked list structure of sr_arpreq in "sr_arpcache.h" */
-    struct sr_arpreq* next;
-    while(request) {
-        next = request->next;
-        handle_arpreq(sr, request);
-        request = next;
+    struct sr_arpreq *arp_requests;
+    struct sr_arpreq *curr;
+    arp_requests = sr->cache.requests;
+    curr = arp_requests;
+    while(arp_requests != NULL){
+        curr = arp_requests->next;
+        handle_arpreq(arp_requests, sr); 
+        arp_requests = curr;
     }
+
+}
+
+void handle_arpreq(struct sr_arpreq *req, struct sr_instance *sr){
+
+    time_t now = time(NULL);
+    double difference;
+
+    difference = difftime(now, req->sent);
+    if(difference >= 1.0){
+        if(req->times_sent >= 5){
+            struct sr_packet *pkt = req->packets;
+            struct sr_ethernet_hdr *ethernet_header;
+            while(pkt != NULL){
+                ethernet_header = (struct sr_ethernet_hdr *)(pkt->buf);
+                unsigned char *host_dest = ethernet_header->ether_dhost;
+                if(sr_get_interface_by_mac(sr, host_dest)){
+                    send_message_icmp(sr, pkt->buf, pkt->len, icmp_type_dest_unreachable, icmp_dest_unreachable_host);
+                }
+                pkt = pkt->next;
+            }
+            sr_arpreq_destroy(&sr->cache, req);
+        }
+        else{
+            
+            if(sr_get_interface(sr, req->packets->iface) == NULL){
+                fprintf(stderr, "Error : interface error in handle_arpreq");
+                return;
+            }
+            else{
+                
+                uint8_t *new_arp_request;
+                new_arp_request = malloc(sizeof(struct sr_arp_hdr) + sizeof(struct sr_ethernet_hdr));
+
+                struct sr_ethernet_hdr *req_ethernet_header = (struct sr_ethernet_hdr *)new_arp_request;
+                struct sr_if *interface;
+                interface = sr_get_interface(sr, req->packets->iface);
+                memset(req_ethernet_header->ether_dhost, 0xFF, ETHER_ADDR_LEN);
+                memcpy(req_ethernet_header->ether_shost, interface->addr, ETHER_ADDR_LEN);
+
+                req_ethernet_header->ether_type = htons(ethertype_arp);
+
+                
+                size_t size_of_ethernet_header = sizeof(struct sr_ethernet_hdr);
+                struct sr_arp_hdr *req_arp_header = (struct sr_arp_hdr *)(new_arp_request + size_of_ethernet_header);
+
+                req_arp_header->ar_pln = (unsigned char)sizeof(unsigned int);
+                memcpy(req_arp_header->ar_sha, interface->addr, ETHER_ADDR_LEN);
+
+                req_arp_header->ar_hrd = (unsigned short)htons(arp_hrd_ethernet); 
+                req_arp_header->ar_sip = interface->ip; 
+                memset(req_arp_header->ar_tha, 0x00, ETHER_ADDR_LEN);
+
+                req_arp_header->ar_pro = (unsigned short)htons(ethertype_ip); 
+
+                req_arp_header->ar_hln = (unsigned char)ETHER_ADDR_LEN;
+
+                req_arp_header->ar_tip = req->ip;
+                req_arp_header->ar_op = (unsigned short)htons(arp_op_request); 
+                
+                
+                int size_of_request = sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_arp_hdr);
+                sr_send_packet(sr, new_arp_request, size_of_request, interface->name);
+                
+                free(new_arp_request);
+
+                
+                req->sent = now;
+                req->times_sent = req->times_sent + 1;
+            }
+
+        }
+    }
+    
 }
 
 /* You should not need to touch the rest of this code. */
@@ -160,7 +160,7 @@ struct sr_arpreq *sr_arpcache_queuereq(struct sr_arpcache *cache,
         req->next = cache->requests;
         cache->requests = req;
     }
-
+    
     /* Add the packet to the list of packets for this request */
     if (packet && packet_len && iface) {
         struct sr_packet *new_pkt = (struct sr_packet *)malloc(sizeof(struct sr_packet));

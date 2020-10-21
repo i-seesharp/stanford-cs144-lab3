@@ -56,6 +56,17 @@ struct sr_instance
     FILE* logfile;
 };
 
+
+void arp_handler(unsigned char *, unsigned int , char *, struct sr_instance *);
+
+void send_message_icmp(struct sr_instance *, unsigned char *, unsigned int , unsigned char , unsigned char );
+
+void send_packet(struct sr_instance *, unsigned char *, unsigned int , struct sr_if *, uint32_t );
+
+void ip_handler(unsigned char *, unsigned int , char *, struct sr_instance *);
+
+int run_ip_sanity_check(sr_ip_hdr_t *);
+
 /* -- sr_main.c -- */
 int sr_verify_routing_table(struct sr_instance* sr);
 
@@ -73,11 +84,5 @@ void sr_add_interface(struct sr_instance* , const char* );
 void sr_set_ether_ip(struct sr_instance* , uint32_t );
 void sr_set_ether_addr(struct sr_instance* , const unsigned char* );
 void sr_print_if_list(struct sr_instance* );
-
-/* Custom methods */
-void send_packet(struct sr_instance*, uint8_t*, unsigned int, struct sr_if*, uint32_t);
-void send_icmp_msg(struct sr_instance*, uint8_t*, unsigned int, uint8_t, uint8_t);
-void handle_arp(struct sr_instance*, uint8_t*, unsigned int, char*);
-void handle_ip(struct sr_instance*, uint8_t*, unsigned int, char*);
 
 #endif /* SR_ROUTER_H */
