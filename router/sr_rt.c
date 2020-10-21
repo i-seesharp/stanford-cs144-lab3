@@ -21,6 +21,7 @@
 
 #include "sr_rt.h"
 #include "sr_router.h"
+#include "sr_utils.h"
 
 
 struct sr_rt* longest_matching_prefix(struct sr_instance* sr, uint32_t ip) {
