@@ -50,13 +50,6 @@ struct sr_rt* longest_matching_prefix(struct sr_instance* sr, uint32_t ip) {
         addr_ip_int(gw_string, ntohl(longest_prefix_entry->gw.s_addr));
         char mask_string[15];
         addr_ip_int(mask_string, ntohl(longest_prefix_entry->mask.s_addr));
-        printf(
-            "Found longest matching prefix: {dest:\"%s\",gw:\"%s\",mask:\"%s\",interface:\"%s\"}.\n",
-            dest_string,
-            gw_string,
-            mask_string,
-            longest_prefix_entry->interface
-        );
     } else {
         printf("Cannot find any longest matching prefix.\n");
     }
