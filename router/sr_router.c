@@ -121,7 +121,7 @@ void send_message_icmp(struct sr_instance *sr, unsigned char *pkt, unsigned int 
     struct sr_ethernet_hdr *ethernet_header = (struct sr_ethernet_hdr *)pkt;
     struct sr_ip_hdr *ip_header = (struct sr_ip_hdr *)(pkt + sizeof(struct sr_ethernet_hdr));
     struct sr_rt* routing_entry = longest_matching_prefix(sr, ip_header->ip_src);
-    if(routing_entry == NULL) {
+    if(routing_entry) {
         fprintf(stderr, "Error: routing_entry not found in send_message_icmp");
         return;
     }
@@ -144,10 +144,8 @@ void send_message_icmp(struct sr_instance *sr, unsigned char *pkt, unsigned int 
             icmp_header->icmp_code = code;
             icmp_header->icmp_type = type;
 
-            memset(&(icmp_header->icmp_sum), 0, sizeof(uint16_t));
-            uint16_t new_checksum = cksum(icmp_header, len - sizeof(struct sr_ethernet_hdr) - sizeof(struct sr_ip_hdr));
-
-            icmp_header->icmp_sum = new_checksum;
+            icmp_header->icmp_sum = 0;
+            icmp_header->icmp_sum = cksum(icmp_header, ntohs(ip_header->ip_len) - (ip_header->ip_hl * 4));
             
             send_packet(sr, pkt, len, iface, routing_entry->gw.s_addr);
             break;
@@ -215,7 +213,7 @@ void arp_handler(unsigned char *pkt, unsigned int len, char *iface, struct sr_in
 
   struct sr_if *going_iface;
   going_iface = sr_get_interface_by_ip(sr, header_arp->ar_tip);
-  if(going_iface == NULL){
+  if(going_iface){
     fprintf(stderr, "Error: outgoing interface error in  arp handler");
   }
 
@@ -316,7 +314,7 @@ void ip_handler(unsigned char *pkt, unsigned int len, char *interface, struct sr
         }
 
         struct sr_if* going_interface = sr_get_interface(sr, table_entry->interface);
-        if(going_interface == NULL) {
+        if(going_interface) {
             fprintf(stderr, "Error: interface not found in handle_ip");
             return;
         }
